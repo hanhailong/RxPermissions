@@ -2,9 +2,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p/>
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- * <p/>
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,6 +29,7 @@ import rx.Observable;
 import rx.functions.Action0;
 import rx.functions.FuncN;
 import rx.subjects.PublishSubject;
+import rx.subjects.Subject;
 
 public class RxPermissions {
 
@@ -54,10 +55,10 @@ public class RxPermissions {
 
     /**
      * Register one or several permission requests and returns an observable.
-     * <p/>
+     * <p>
      * For SDK &lt; 23, the observable will immediatly emit true, otherwise
      * the user response to that request.
-     * <p/>
+     * <p>
      * It handles multiple requests to the same permission, in that case the
      * same observable will be returned.
      */
@@ -85,10 +86,16 @@ public class RxPermissions {
         // At the end, the observables are combined to have a unique response.
         for (String permission : permissions) {
             PublishSubject<Boolean> subject = mSubjects.get(permission);
-            if (subject == null) {
+            // Create a new subject if not exists OR if completed.
+            // This last case occurs on configuration change, and in that case
+            // we need to recreate a new subject, but without request the permission
+            // again.
+            if (subject == null || subject.hasCompleted()) {
+                if (subject == null) {
+                    unrequestedPermissions.add(permission);
+                }
                 subject = PublishSubject.create();
                 mSubjects.put(permission, subject);
-                unrequestedPermissions.add(permission);
             }
             list.add(subject);
         }
@@ -113,7 +120,7 @@ public class RxPermissions {
 
     /**
      * Returns true if the permissions is already granted.
-     * <p/>
+     * <p>
      * Always true if SDK &lt; 23.
      */
     public boolean isGranted(String... permissions) {
@@ -130,12 +137,14 @@ public class RxPermissions {
         return true;
     }
 
-    /**
-     * Must be invoked in {@code Activity.onRequestPermissionsResult}
-     * <p/>
-     * The method will find the pending requests and emit the response to the
-     * matching observables.
-     */
+    void onDestroy() {
+        // Invoke onCompleted on all registered subjects.
+        // This should unsubscribe the observers.
+        for (Subject subject : mSubjects.values()) {
+            subject.onCompleted();
+        }
+    }
+
     void onRequestPermissionsResult(int requestCode,
                                     String permissions[], int[] grantResults) {
         for (int i = 0; i < permissions.length; i++) {
